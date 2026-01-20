@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HEAD_DETACHED // GIT_LEARNING_PROTOCOL</title>
+    <style>
+        /* --- 1. ACID STYLING --- */
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #050505; 
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        /* The Canvas sits behind everything */
+        #canvas-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: 0;
+        }
+
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            z-index: 10;
+            color: #CCFF00; /* Acid Green */
+            padding: 2rem;
+            pointer-events: none; /* Let clicks pass through to 3D */
+            mix-blend-mode: difference; /* Retro blending */
+        }
+
+        h1 {
+            font-size: 4rem;
+            line-height: 0.8;
+            letter-spacing: -2px;
+            text-transform: uppercase;
+            margin: 0;
+            filter: drop-shadow(0px 0px 5px #CCFF00);
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            background: #CCFF00;
+            color: #000;
+            display: inline-block;
+            padding: 2px 8px;
+            margin-top: 1rem;
+            font-weight: bold;
+        }
+
+        .warning {
+            position: absolute;
+            bottom: 2rem;
+            right: 2rem;
+            font-size: 0.8rem;
+            border: 1px solid #CCFF00;
+            padding: 10px;
+            animation: blink 1s step-end infinite;
+        }
+
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <h1>Shreyash<br>Srivastva</h1>
+        <div class="subtitle">Hamoud <br>Habibi</div>
+        <div class="warning">
+            > Juice Pilado Musammi Ka
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- CONFIGURATION ---
+        const ACID_GREEN = new THREE.Vector3(0.8, 1.0, 0.0); // #CCFF00
+        const DEEP_BLACK = new THREE.Vector3(0.02, 0.02, 0.02);
+        const PIXEL_SCALE = 4.0; // Higher = blockier pixels
+
+        // --- SETUP SCENE ---
+        const container = document.getElementById('canvas-container');
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        // We use two scenes: 
+        // 1. The 3D Scene (rendered to a texture)
+        // 2. The Post-Processing Scene (renders the texture with the Dither Shader)
+        const scene3D = new THREE.Scene();
+        const camera3D = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera3D.position.z = 3;
+
+        // --- ADD THE "GIT OBJECT" (A Torus Knot representing a SHA-1 hash) ---
+        const geometry = new THREE.TorusKnotGeometry(0.8, 0.25, 100, 16);
+        const material = new THREE.MeshNormalMaterial(); // Colors based on normals for cool gradients
+        const gitObject = new THREE.Mesh(geometry, material);
+        scene3D.add(gitObject);
+
+        // --- POST-PROCESSING SETUP ---
+        // Create a buffer to render the 3D scene into
+        const renderTarget = new THREE.WebGLRenderTarget(
+            window.innerWidth, 
+            window.innerHeight, 
+            { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }
+        );
+
+        const postScene = new THREE.Scene();
+        const postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        
+        // --- THE DITHER SHADER (GLSL) ---
+        const ditherMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                tDiffuse: { value: renderTarget.texture },
+                uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                uPixelSize: { value: PIXEL_SCALE },
+                uColor1: { value: ACID_GREEN },
+                uColor2: { value: DEEP_BLACK }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D tDiffuse;
+                uniform vec2 uResolution;
+                uniform float uPixelSize;
+                uniform vec3 uColor1;
+                uniform vec3 uColor2;
+                varying vec2 vUv;
+
+                // Standard Bayer Matrix 4x4 for ordered dithering
+                float bayerDither(vec2 p) {
+                    int x = int(mod(p.x, 4.0));
+                    int y = int(mod(p.y, 4.0));
+                    int index = x + y * 4;
+                    
+                    float limit = 0.0;
+                    if (index == 0) limit = 1.0;  else if (index == 1) limit = 9.0;
+                    else if (index == 2) limit = 3.0;  else if (index == 3) limit = 11.0;
+                    else if (index == 4) limit = 13.0; else if (index == 5) limit = 5.0;
+                    else if (index == 6) limit = 15.0; else if (index == 7) limit = 7.0;
+                    else if (index == 8) limit = 4.0;  else if (index == 9) limit = 12.0;
+                    else if (index == 10) limit = 2.0; else if (index == 11) limit = 10.0;
+                    else if (index == 12) limit = 16.0; else if (index == 13) limit = 8.0;
+                    else if (index == 14) limit = 14.0; else if (index == 15) limit = 6.0;
+                    
+                    return limit / 17.0;
+                }
+
+                void main() {
+                    // Pixelate the UV coordinates
+                    vec2 pixelUV = floor(vUv * uResolution / uPixelSize) * uPixelSize / uResolution;
+                    
+                    // Sample the 3D scene
+                    vec4 color = texture2D(tDiffuse, pixelUV);
+                    
+                    // Convert to Grayscale (Luminance)
+                    float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+                    
+                    // Get Dither Threshold based on screen coordinates
+                    float dither = bayerDither(gl_FragCoord.xy / uPixelSize);
+                    
+                    // Thresholding: If gray is brighter than dither pattern -> Acid Green, else Black
+                    vec3 finalColor = (gray > dither) ? uColor1 : uColor2;
+
+                    gl_FragColor = vec4(finalColor, 1.0);
+                }
+            `
+        });
+
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), ditherMaterial);
+        postScene.add(quad);
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Rotate the Git Object
+            gitObject.rotation.x += 0.01;
+            gitObject.rotation.y += 0.015;
+
+            // 1. Render 3D scene to texture (buffer)
+            renderer.setRenderTarget(renderTarget);
+            renderer.render(scene3D, camera3D);
+
+            // 2. Render Post-Processing scene to screen
+            renderer.setRenderTarget(null);
+            renderer.render(postScene, postCamera);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            camera3D.aspect = width / height;
+            camera3D.updateProjectionMatrix();
+            
+            renderer.setSize(width, height);
+            renderTarget.setSize(width, height);
+            
+            ditherMaterial.uniforms.uResolution.value.set(width, height);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
